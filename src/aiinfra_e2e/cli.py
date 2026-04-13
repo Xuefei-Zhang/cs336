@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from aiinfra_e2e.config import (
     DataConfig,
     EvalConfig,
+    LoadTestConfig,
     ObsConfig,
     ServeConfig,
     TrainConfig,
@@ -194,7 +195,7 @@ def obs_command(config: ConfigOption = None) -> None:
 def loadtest_command(config: ConfigOption = None) -> None:
     """Validate loadtest config input for future load testing workflows."""
 
-    _handle_stub_command("Loadtest", config, _StubConfig)
+    _handle_stub_command("Loadtest", config, LoadTestConfig)
 
 
 app.add_typer(env_app, name="env")
