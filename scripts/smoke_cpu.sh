@@ -20,12 +20,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-RUN_ROOT=${CPU_SMOKE_RUN_ROOT:-$TMP_DIR/artifacts/runs}
-TRACKING_URI=${CPU_SMOKE_TRACKING_URI:-$TMP_DIR/mlruns}
+RUN_ROOT=${CPU_SMOKE_RUN_ROOT:-$REPO_ROOT/artifacts/runs}
+TRACKING_URI=${CPU_SMOKE_TRACKING_URI:-$REPO_ROOT/mlruns}
 TRAIN_RUN_NAME=${CPU_SMOKE_RUN_NAME:-cpu-smoke-script}
 EVAL_RUN_NAME=${CPU_SMOKE_EVAL_RUN_NAME:-offline-eval-smoke-script}
 EVAL_EXPERIMENT=${CPU_SMOKE_EVAL_EXPERIMENT:-cpu-smoke-eval}
-ENV_OUT=${CPU_SMOKE_ENV_OUT:-$TMP_DIR/env}
+ENV_OUT=${CPU_SMOKE_ENV_OUT:-$REPO_ROOT/artifacts/env}
 
 printf '==> Validating checked-in configs\n'
 run_cli data --config "$REPO_ROOT/configs/data/alpaca_zh_51k.yaml"
@@ -92,7 +92,7 @@ EOF
 
 printf '==> Running minimal CPU training + offline eval pipeline\n'
 export CUDA_VISIBLE_DEVICES=
-export PYTEST_CURRENT_TEST=${PYTEST_CURRENT_TEST:-scripts/smoke_cpu.sh::cpu_smoke}
+export AIINFRA_E2E_CPU_SMOKE=${AIINFRA_E2E_CPU_SMOKE:-1}
 export DATA_CONFIG TRAIN_CONFIG OBS_CONFIG EVAL_CONFIG TRACKING_URI TRAIN_RUN_NAME EVAL_EXPERIMENT
 "$PYTHON_BIN" - <<'PY'
 import os
