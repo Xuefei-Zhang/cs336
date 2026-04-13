@@ -1,0 +1,16 @@
+metric: offline
+batch_size: 1
+sample_count: 2
+output_dir: artifacts/runs
+run_name: offline-eval-sample
+golden_prompts:
+  - name: concise-answer
+    prompt: Say hello politely
+    constraints:
+      min_length: 8
+      must_contain:
+        - hello
+  - name: avoid-repetition
+    prompt: Explain caching without repeating words too much
+    constraints:
+      max_repetition_ratio: 0.34

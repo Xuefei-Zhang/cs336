@@ -51,9 +51,19 @@ class TrainConfig(StrictModel):
     lora_target_modules: str | list[str] | None = "all-linear"
 
 
+class GoldenPromptConfig(StrictModel):
+    name: str
+    prompt: str
+    constraints: dict[str, int | float | str | list[str]]
+
+
 class EvalConfig(StrictModel):
     metric: str = "loss"
     batch_size: int = 1
+    sample_count: int = 1
+    output_dir: str = "artifacts/runs"
+    run_name: str | None = None
+    golden_prompts: list[GoldenPromptConfig] = []
 
 
 class ServeConfig(StrictModel):
