@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: aiinfra-e2e
+    orgId: 1
+    folder: AIInfra E2E
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
