@@ -20,6 +20,44 @@ make lint
 make test
 ```
 
+## Interview Demo
+
+### Prerequisites
+
+- Run `make setup` first so `aiinfra-e2e` and the Python dependencies are available.
+- `scripts/smoke_cpu.sh` is CPU-only and self-contained; it validates the checked-in configs, writes a temporary env report, runs a one-step CPU SFT smoke path, and writes an offline eval report.
+- `scripts/e2e_gpu.sh` is for a GPU host with CUDA, an NVIDIA runtime, `vllm`, and `locust` available in the active Python environment.
+- The default GPU configs point at real Hugging Face assets. If you are using gated weights, export the required Hugging Face credentials first; if you want different paths, override the config env vars shown below instead of editing the script.
+
+### CPU smoke demo
+
+```bash
+bash scripts/smoke_cpu.sh
+```
+
+### GPU end-to-end demo
+
+Optional: start the observability stack first so MLflow, Prometheus, and Grafana are live during the demo.
+
+```bash
+make obs-up
+```
+
+Run the full GPU playbook with env-overridable config paths:
+
+```bash
+DATA_CONFIG=configs/data/alpaca_zh_51k.yaml \
+TRAIN_CONFIG=configs/train/qwen2p5_7b_qlora_ddp4.yaml \
+EVAL_CONFIG=configs/eval/offline.yaml \
+SERVE_CONFIG=configs/serve/vllm_openai_lora.yaml \
+LOADTEST_CONFIG=configs/serve/loadtest.yaml \
+OBS_TRACKING_URI=mlruns \
+OBS_EXPERIMENT_NAME=interview-demo \
+bash scripts/e2e_gpu.sh
+```
+
+`e2e_gpu.sh` runs the stages in order: data sync, preprocess sample, train, offline eval, `serve --config`, and a headless Locust load test that writes HTML/JSON reports under the configured `output_dir`.
+
 ## Observability
 
 Start the wrapper metrics endpoint first so Prometheus has something to scrape, then bring up the observability stack:
