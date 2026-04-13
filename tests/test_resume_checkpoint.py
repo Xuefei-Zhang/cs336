@@ -1,11 +1,17 @@
 import json
+import builtins
+import importlib
+import importlib.util
 from pathlib import Path
+import sys
+import types
 
 from datasets import Dataset
 import torch
 
 from aiinfra_e2e.config import DataConfig, ObsConfig, TrainConfig
 from aiinfra_e2e.train.checkpointing import latest_checkpoint, should_resume
+from aiinfra_e2e.train import sft as sft_module
 from aiinfra_e2e.train.sft import run_sft
 
 
@@ -57,7 +63,9 @@ def _base_configs(tmp_path: Path) -> tuple[DataConfig, TrainConfig, ObsConfig]:
 
 def test_should_resume_accepts_boolean_and_path_inputs() -> None:
     assert should_resume(TrainConfig(model_id="model", resume_from_checkpoint=True)) is True
-    assert should_resume(TrainConfig(model_id="model", resume_from_checkpoint="checkpoint-9")) is True
+    assert (
+        should_resume(TrainConfig(model_id="model", resume_from_checkpoint="checkpoint-9")) is True
+    )
     assert should_resume(TrainConfig(model_id="model", resume_from_checkpoint=False)) is False
 
 
@@ -72,7 +80,55 @@ def test_latest_checkpoint_returns_highest_checkpoint_step(tmp_path: Path) -> No
     assert latest_checkpoint(run_dir) == checkpoint_ten
 
 
-def test_run_sft_resumes_from_latest_checkpoint_without_restarting(tmp_path: Path, monkeypatch) -> None:
+def test_load_trl_sft_objects_supports_public_imports(monkeypatch) -> None:
+    spec = importlib.util.find_spec("aiinfra_e2e.train.trl_compat")
+    assert spec is not None
+
+    compat_module = importlib.import_module("aiinfra_e2e.train.trl_compat")
+    fake_trl = types.ModuleType("trl")
+    fake_sft_trainer = type("FakePublicSFTTrainer", (), {})
+    fake_sft_config = type("FakePublicSFTConfig", (), {})
+    setattr(fake_trl, "SFTTrainer", fake_sft_trainer)
+    setattr(fake_trl, "SFTConfig", fake_sft_config)
+
+    monkeypatch.setitem(sys.modules, "trl", fake_trl)
+
+    trainer_cls, config_cls = compat_module.load_trl_sft_objects(force_reload=True)
+
+    assert trainer_cls is fake_sft_trainer
+    assert config_cls is fake_sft_config
+
+
+def test_load_trl_sft_objects_rejects_private_trl_fallbacks(monkeypatch) -> None:
+    compat_module = importlib.import_module("aiinfra_e2e.train.trl_compat")
+    fake_trl = types.ModuleType("trl")
+    original_import = builtins.__import__
+
+    monkeypatch.setitem(sys.modules, "trl", fake_trl)
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.startswith("trl.trainer"):
+            raise AssertionError(f"private TRL import attempted: {name}")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    try:
+        compat_module.load_trl_sft_objects(force_reload=True)
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected RuntimeError when TRL public exports are unavailable")
+
+    assert "trl.SFTTrainer" in message
+    assert "trl.SFTConfig" in message
+
+
+def test_run_sft_resumes_from_latest_checkpoint_without_restarting(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AIINFRA_E2E_CPU_SMOKE", "1")
+
     data_config, train_config, obs_config = _base_configs(tmp_path)
     dataset = _build_dataset()
     monkeypatch.setattr("aiinfra_e2e.train.sft.load_hf_dataset", lambda config: dataset)
@@ -92,9 +148,7 @@ def test_run_sft_resumes_from_latest_checkpoint_without_restarting(tmp_path: Pat
     checkpoint_one = run_dir / "checkpoint-1"
     assert checkpoint_one.exists()
 
-    import trl.trainer.sft_trainer as sft_trainer_module
-
-    original_training_step = sft_trainer_module.SFTTrainer.training_step
+    original_training_step = sft_module.SFTTrainer.training_step
     training_step_calls = 0
 
     def counting_training_step(self, *args, **kwargs):
@@ -103,7 +157,7 @@ def test_run_sft_resumes_from_latest_checkpoint_without_restarting(tmp_path: Pat
         return original_training_step(self, *args, **kwargs)
 
     monkeypatch.setattr(
-        sft_trainer_module.SFTTrainer,
+        sft_module.SFTTrainer,
         "training_step",
         counting_training_step,
     )
@@ -196,9 +250,13 @@ def test_run_sft_retries_cuda_oom_with_bounded_fallback(tmp_path: Path, monkeypa
     _ = (checkpoint_dir / "trainer_state.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr("aiinfra_e2e.train.sft.load_hf_dataset", lambda config: _build_dataset())
-    monkeypatch.setattr("aiinfra_e2e.train.sft._load_tokenizer", lambda *args, **kwargs: _FakeTokenizer())
+    monkeypatch.setattr(
+        "aiinfra_e2e.train.sft._load_tokenizer", lambda *args, **kwargs: _FakeTokenizer()
+    )
     monkeypatch.setattr("aiinfra_e2e.train.sft._load_model", lambda *args, **kwargs: _FakeModel())
-    monkeypatch.setattr("aiinfra_e2e.train.sft._prepare_train_split", lambda *args, **kwargs: _build_dataset())
+    monkeypatch.setattr(
+        "aiinfra_e2e.train.sft._prepare_train_split", lambda *args, **kwargs: _build_dataset()
+    )
     monkeypatch.setattr("aiinfra_e2e.train.sft.SFTTrainer", _FakeTrainer)
     monkeypatch.setattr("aiinfra_e2e.train.sft.SFTConfig", _DummyTrainingArgs)
     monkeypatch.setattr("aiinfra_e2e.train.sft._should_enable_qlora", lambda: False)
@@ -224,5 +282,9 @@ def test_run_sft_retries_cuda_oom_with_bounded_fallback(tmp_path: Path, monkeypa
     assert _FakeTrainer.attempts == 3
     assert _FakeTrainer.batch_sizes == [1, 1, 1]
     assert _FakeTrainer.max_lengths == [128, 64, 32]
-    assert _FakeTrainer.resume_args == [str(checkpoint_dir), str(checkpoint_dir), str(checkpoint_dir)]
+    assert _FakeTrainer.resume_args == [
+        str(checkpoint_dir),
+        str(checkpoint_dir),
+        str(checkpoint_dir),
+    ]
     assert _FakeTrainer.saved_model_dirs == [str(run_dir / "lora_adapter")]

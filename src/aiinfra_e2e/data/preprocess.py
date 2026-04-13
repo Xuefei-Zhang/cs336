@@ -46,6 +46,7 @@ def preprocess_record(
     instruction_field: str = "instruction",
     input_field: str = "input",
     output_field: str = "output",
+    text_field: str = "text",
 ) -> SFTRecord:
     """Convert an Alpaca-style row into chat messages, rendered text, and assistant-only labels."""
 
@@ -63,9 +64,12 @@ def preprocess_record(
     assistant_start = len(prefix_ids)
     labels[assistant_start:] = input_ids[assistant_start:]
 
-    return {
+    processed_record: SFTRecord = {
         "messages": messages,
         "text": text,
         "input_ids": input_ids,
         "labels": labels,
     }
+    if text_field != "text":
+        processed_record[text_field] = text
+    return processed_record

@@ -1,3 +1,5 @@
+from typing import cast
+
 from aiinfra_e2e.data.preprocess import preprocess_record
 from aiinfra_e2e.data.prompt_format import DEFAULT_SYSTEM_PROMPT
 
@@ -83,3 +85,30 @@ def test_preprocess_record_masks_prefix_and_keeps_assistant_tokens_trainable() -
 
     assert record["labels"][: len(prefix_ids)] == [-100] * len(prefix_ids)
     assert record["labels"][-len(assistant_ids) :] == assistant_ids
+
+
+def test_preprocess_record_honors_custom_prompt_response_and_text_fields() -> None:
+    tokenizer = FakeTokenizer()
+
+    record = preprocess_record(
+        {
+            "prompt": "Translate to English",
+            "context": "早上好",
+            "answer": "good morning",
+        },
+        tokenizer=tokenizer,
+        instruction_field="prompt",
+        input_field="context",
+        output_field="answer",
+        text_field="formatted_prompt",
+    )
+
+    record_dict = cast(dict[str, object], cast(object, record))
+
+    assert record_dict["formatted_prompt"] == (
+        f"<system> {DEFAULT_SYSTEM_PROMPT}\n"
+        "<user> Translate to English\n\nInput:\n早上好\n"
+        "<assistant> good morning"
+    )
+    assert record["messages"][1]["content"] == "Translate to English\n\nInput:\n早上好"
+    assert record["labels"][-2:] == tokenizer("good morning", add_special_tokens=False)["input_ids"]

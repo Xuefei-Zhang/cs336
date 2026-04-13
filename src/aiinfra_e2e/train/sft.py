@@ -9,7 +9,7 @@ import sys
 from collections.abc import Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from datasets import Dataset
 import huggingface_hub.constants as hf_constants
@@ -24,8 +24,6 @@ from transformers import (
     set_seed,
 )
 import transformers.utils.hub as transformers_hub
-from trl.trainer.sft_config import SFTConfig
-from trl.trainer.sft_trainer import SFTTrainer
 
 from aiinfra_e2e.config import DataConfig, ObsConfig, TrainConfig, load_yaml
 from aiinfra_e2e.data.hf_sync import load_hf_dataset
@@ -40,8 +38,10 @@ from aiinfra_e2e.train.checkpointing import (
     resolve_resume_checkpoint,
 )
 from aiinfra_e2e.train.qlora import build_lora_config, build_quantization_config
+from aiinfra_e2e.train.trl_compat import SFTConfig, SFTTrainer
 
 CPU_SMOKE_MODEL_ID = "sshleifer/tiny-gpt2"
+CPU_SMOKE_ENV_VAR = "AIINFRA_E2E_CPU_SMOKE"
 
 
 class SupervisedDataCollator:
@@ -79,7 +79,7 @@ class SupervisedDataCollator:
 
 
 def _is_cpu_smoke_mode() -> bool:
-    return (not torch.cuda.is_available()) or ("PYTEST_CURRENT_TEST" in os.environ)
+    return (not torch.cuda.is_available()) or (os.environ.get(CPU_SMOKE_ENV_VAR) == "1")
 
 
 def _resolve_model_id(train_config: TrainConfig) -> str:
@@ -95,7 +95,7 @@ def _resolve_run_id(train_config: TrainConfig) -> str:
 
 
 def _should_enable_qlora() -> bool:
-    return torch.cuda.is_available() and ("PYTEST_CURRENT_TEST" not in os.environ)
+    return torch.cuda.is_available() and (not _is_cpu_smoke_mode())
 
 
 def _resolve_model_cache_dir(*, data_config: DataConfig, train_config: TrainConfig) -> Path:
@@ -218,10 +218,16 @@ def _prepare_train_split(
     original_columns = list(train_split.column_names)
 
     processed = train_split.map(
-        lambda record: preprocess_record(record, tokenizer=tokenizer),
+        lambda record: preprocess_record(
+            record,
+            tokenizer=tokenizer,
+            instruction_field=data_config.prompt_field or "instruction",
+            output_field=data_config.response_field or "output",
+            text_field=data_config.text_field,
+        ),
         remove_columns=original_columns,
     )
-    return processed.select_columns(["input_ids", "labels", "text"])
+    return processed.select_columns(["input_ids", "labels", data_config.text_field])
 
 
 def _load_tokenizer(model_id: str, *, cache_dir: Path) -> PreTrainedTokenizerBase:
@@ -265,7 +271,9 @@ def _load_model(
     return model
 
 
-def _build_training_args(train_config: TrainConfig, run_dir: Path) -> SFTConfig:
+def _build_training_args(
+    train_config: TrainConfig, run_dir: Path, *, dataset_text_field: str
+) -> Any:
     use_cpu = not torch.cuda.is_available()
     return SFTConfig(
         output_dir=str(run_dir),
@@ -281,7 +289,7 @@ def _build_training_args(train_config: TrainConfig, run_dir: Path) -> SFTConfig:
         report_to="none",
         remove_unused_columns=False,
         label_names=["labels"],
-        dataset_text_field="text",
+        dataset_text_field=dataset_text_field,
         max_length=train_config.max_seq_len,
         packing=False,
         use_cpu=use_cpu,
@@ -315,7 +323,11 @@ def _train_once(
         qlora_enabled=qlora_enabled,
         gradient_checkpointing=train_config.gradient_checkpointing,
     )
-    training_args = _build_training_args(train_config, run_dir)
+    training_args = _build_training_args(
+        train_config,
+        run_dir,
+        dataset_text_field=data_config.text_field,
+    )
     trainer = SFTTrainer(
         model=model,
         args=training_args,
