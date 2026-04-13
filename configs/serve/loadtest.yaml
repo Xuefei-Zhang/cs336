@@ -1,0 +1,14 @@
+run_name: serve-loadtest
+output_dir: artifacts/runs
+users: 4
+spawn_rate: 2
+run_time: 1m
+prompt: Say hello in one short sentence.
+max_tokens: 64
+serve:
+  host: 127.0.0.1
+  port: 8000
+  served_model_name: llama-openai
+obs:
+  tracking_uri: mlruns
+  experiment_name: loadtest

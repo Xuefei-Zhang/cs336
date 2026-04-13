@@ -97,6 +97,18 @@ class ObsConfig(StrictModel):
     experiment_name: str = "default"
 
 
+class LoadTestConfig(StrictModel):
+    run_name: str | None = None
+    output_dir: str = "artifacts/runs"
+    users: int = 1
+    spawn_rate: float = 1.0
+    run_time: str = "1m"
+    prompt: str = "Say hello in one short sentence."
+    max_tokens: int = 64
+    serve: ServeConfig
+    obs: ObsConfig = Field(default_factory=ObsConfig)
+
+
 class RunConfig(StrictModel):
     data: DataConfig
     train: TrainConfig | None = None
