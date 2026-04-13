@@ -1,5 +1,11 @@
 dataset_id: hfl/alpaca_zh_51k
 split: train
+cache_dir: artifacts/hf-cache
 prompt_field: instruction
 response_field: output
 text_field: output
+train_ratio: 0.9
+val_ratio: 0.05
+split_key_fields:
+  - instruction
+  - output

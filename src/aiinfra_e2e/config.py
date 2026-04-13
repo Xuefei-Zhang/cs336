@@ -24,6 +24,10 @@ class DataConfig(StrictModel):
     text_field: str = "text"
     prompt_field: str | None = None
     response_field: str | None = None
+    cache_dir: str | None = None
+    train_ratio: float = 0.9
+    val_ratio: float = 0.05
+    split_key_fields: list[str] | None = None
 
 
 class TrainConfig(StrictModel):
