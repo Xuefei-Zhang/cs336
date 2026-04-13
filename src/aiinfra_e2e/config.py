@@ -36,6 +36,10 @@ class TrainConfig(StrictModel):
     run_name: str | None = None
     seed: int = 42
     max_steps: int = 100
+    save_steps: int = 50
+    resume_from_checkpoint: bool | str = False
+    oom_retries: int = 0
+    max_seq_len: int | None = None
     per_device_train_batch_size: int = 1
     gradient_accumulation_steps: int = 1
     learning_rate: float = 2e-4
