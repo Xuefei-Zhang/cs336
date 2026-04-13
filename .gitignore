@@ -1,5 +1,10 @@
 artifacts/
 mlruns/
+mlruns_*/
+.sisyphus/boulder.json
+.sisyphus/drafts/
+.sisyphus/evidence/
+.sisyphus/plans/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
@@ -7,3 +12,4 @@ __pycache__/
 .worktrees/
 .cache/
 *.egg-info/
+debug_*/
