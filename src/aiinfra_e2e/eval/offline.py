@@ -11,6 +11,7 @@ import mlflow
 
 from aiinfra_e2e.config import EvalConfig
 from aiinfra_e2e.eval.golden import GoldenValidationResult, validate_golden_case
+from aiinfra_e2e.obs.mlflow import start_run as start_mlflow_run
 
 Generator = Callable[[str], str]
 
@@ -51,9 +52,11 @@ def _log_mlflow_report(
     passed: int,
     failed: int,
 ) -> None:
-    mlflow.set_tracking_uri(tracking_uri)
-    _ = mlflow.set_experiment(experiment_name)
-    with mlflow.start_run(run_name=run_id):
+    with start_mlflow_run(
+        tracking_uri=tracking_uri,
+        experiment_name=experiment_name,
+        run_name=run_id,
+    ):
         _ = mlflow.log_params({"sample_count": str(sample_count)})
         _ = mlflow.log_metrics({"golden_passed": passed, "golden_failed": failed})
         mlflow.log_artifact(str(report_path))
@@ -107,7 +110,9 @@ def run_offline_eval(
         "golden_results": [result.to_dict() for result in golden_results],
     }
     report_path = run_dir / "eval_report.json"
-    _ = report_path.write_text(json.dumps(report_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _ = report_path.write_text(
+        json.dumps(report_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     _log_mlflow_report(
         tracking_uri=obs_tracking_uri,

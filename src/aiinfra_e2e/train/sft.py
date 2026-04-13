@@ -33,6 +33,7 @@ from aiinfra_e2e.data.preprocess import preprocess_record
 from aiinfra_e2e.data.split import deterministic_split
 from aiinfra_e2e.logging import configure_logging
 from aiinfra_e2e.manifest import JsonValue, write_run_manifest
+from aiinfra_e2e.obs.mlflow import start_run as start_mlflow_run
 from aiinfra_e2e.train.accelerate import get_accelerate_runtime, wait_for_everyone
 from aiinfra_e2e.train.checkpointing import (
     next_oom_retry_config,
@@ -339,9 +340,11 @@ def _log_mlflow_run(
     params: dict[str, str],
     final_loss: float,
 ) -> None:
-    mlflow.set_tracking_uri(obs_config.tracking_uri)
-    _ = mlflow.set_experiment(obs_config.experiment_name)
-    with mlflow.start_run(run_name=run_id):
+    with start_mlflow_run(
+        tracking_uri=obs_config.tracking_uri,
+        experiment_name=obs_config.experiment_name,
+        run_name=run_id,
+    ):
         _ = mlflow.log_params(params)
         _ = mlflow.log_metric("final_loss", final_loss)
         mlflow.log_artifact(str(manifest_path))

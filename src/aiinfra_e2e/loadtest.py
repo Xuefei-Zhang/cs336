@@ -8,6 +8,7 @@ from pathlib import Path
 import mlflow
 
 from aiinfra_e2e.config import LoadTestConfig
+from aiinfra_e2e.obs.mlflow import start_run as start_mlflow_run
 
 CHAT_COMPLETIONS_ENDPOINT = "/v1/chat/completions"
 
@@ -49,9 +50,11 @@ def build_chat_completions_payload(config: LoadTestConfig) -> dict[str, object]:
 
 
 def log_loadtest_reports(*, config: LoadTestConfig, artifacts: LoadTestArtifacts) -> None:
-    mlflow.set_tracking_uri(config.obs.tracking_uri)
-    _ = mlflow.set_experiment(config.obs.experiment_name)
-    with mlflow.start_run(run_name=artifacts.run_id):
+    with start_mlflow_run(
+        tracking_uri=config.obs.tracking_uri,
+        experiment_name=config.obs.experiment_name,
+        run_name=artifacts.run_id,
+    ):
         _ = mlflow.log_params(
             {
                 "endpoint": CHAT_COMPLETIONS_ENDPOINT,
