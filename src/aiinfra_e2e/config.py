@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TypeVar, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_core import InitErrorDetails
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -66,10 +66,30 @@ class EvalConfig(StrictModel):
     golden_prompts: list[GoldenPromptConfig] = []
 
 
+class LoRAAdapterConfig(StrictModel):
+    name: str
+    path: str
+    load_inplace: bool = False
+
+
 class ServeConfig(StrictModel):
     host: str = "0.0.0.0"
     port: int = 8000
     model_id: str | None = None
+    served_model_name: str | None = None
+    metrics_host: str = "127.0.0.1"
+    metrics_port: int = 9100
+    tensor_parallel_size: int = 1
+    max_loras: int = 1
+    max_lora_rank: int = 64
+    gpu_memory_utilization: float | None = None
+    dtype: str | None = None
+    adapters: list[LoRAAdapterConfig] = Field(default_factory=list)
+    extra_args: list[str] = Field(default_factory=list)
+
+    @property
+    def base_url(self) -> str:
+        return f"http://{self.host}:{self.port}"
 
 
 class ObsConfig(StrictModel):
