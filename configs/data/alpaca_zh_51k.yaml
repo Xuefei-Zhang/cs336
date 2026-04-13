@@ -1,0 +1,5 @@
+dataset_id: hfl/alpaca_zh_51k
+split: train
+prompt_field: instruction
+response_field: output
+text_field: output

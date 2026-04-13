@@ -1,0 +1,91 @@
+"""YAML-backed configuration models and validation helpers."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TypeVar, cast
+
+import yaml
+from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic_core import InitErrorDetails
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
+class StrictModel(BaseModel):
+    """Base model that rejects unknown fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DataConfig(StrictModel):
+    dataset_id: str
+    split: str = "train"
+    text_field: str = "text"
+    prompt_field: str | None = None
+    response_field: str | None = None
+
+
+class TrainConfig(StrictModel):
+    model_id: str
+    output_dir: str = "artifacts/train"
+    seed: int = 42
+
+
+class EvalConfig(StrictModel):
+    metric: str = "loss"
+    batch_size: int = 1
+
+
+class ServeConfig(StrictModel):
+    host: str = "0.0.0.0"
+    port: int = 8000
+    model_id: str | None = None
+
+
+class ObsConfig(StrictModel):
+    tracking_uri: str = "mlruns"
+    experiment_name: str = "default"
+
+
+class RunConfig(StrictModel):
+    data: DataConfig
+    train: TrainConfig | None = None
+    eval: EvalConfig | None = None
+    serve: ServeConfig | None = None
+    obs: ObsConfig | None = None
+
+
+def load_yaml(path: str | Path, model_cls: type[ModelT]) -> ModelT:
+    """Load a UTF-8 YAML file and validate it into a Pydantic model."""
+
+    config_path = Path(path)
+
+    try:
+        raw_text = config_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Failed to read config file {config_path}: {exc}") from exc
+
+    try:
+        loaded = yaml.safe_load(raw_text)
+        payload: object = loaded
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Failed to parse YAML config {config_path}: {exc}") from exc
+
+    if payload is None:
+        payload = {}
+
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"Config file {config_path} must contain a YAML mapping at the top level, got {type(payload).__name__}."
+        )
+
+    try:
+        return model_cls.model_validate(payload)
+    except ValidationError as exc:
+        raise ValidationError.from_exception_data(
+            title=f"Validation failed for config file {config_path}",
+            line_errors=cast(list[InitErrorDetails], exc.errors()),
+            input_type="python",
+            hide_input=False,
+        ) from exc
