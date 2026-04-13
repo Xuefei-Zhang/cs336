@@ -125,8 +125,6 @@ class ManagedVLLMServer:
         self.process = subprocess.Popen(
             build_vllm_command(self.config),
             env=build_vllm_environment(self.config),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
             text=True,
         )
         self.wait_until_ready()

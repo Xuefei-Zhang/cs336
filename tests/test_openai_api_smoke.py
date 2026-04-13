@@ -1,6 +1,7 @@
 import json
 import os
 import socket
+import subprocess
 import sys
 from pathlib import Path
 from urllib.error import HTTPError
@@ -212,6 +213,43 @@ def test_get_vllm_smoke_skip_reason_requires_local_runtime(monkeypatch: pytest.M
 
     assert reason is not None
     assert "vLLM" in reason
+
+
+def test_managed_vllm_server_start_does_not_pipe_child_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aiinfra_e2e.serve.vllm_server import ManagedVLLMServer
+
+    class _Process:
+        def poll(self) -> None:
+            return None
+
+    captured: dict[str, object] = {}
+    config = ServeConfig(
+        host="127.0.0.1",
+        port=_free_port(),
+        model_id="meta-llama/Meta-Llama-3-8B-Instruct",
+        metrics_host="127.0.0.1",
+        metrics_port=_free_port(),
+    )
+    server = ManagedVLLMServer(config)
+    monkeypatch.setattr(server.metrics, "start_server", lambda host, port: None)
+    monkeypatch.setattr(server.metrics, "update_gpu_memory", lambda: None)
+    monkeypatch.setattr(ManagedVLLMServer, "wait_until_ready", lambda self: None)
+
+    def _fake_popen(*args: object, **kwargs: object) -> _Process:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _Process()
+
+    monkeypatch.setattr("aiinfra_e2e.serve.vllm_server.subprocess.Popen", _fake_popen)
+
+    server.start()
+
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs.get("stdout") is not subprocess.PIPE
+    assert kwargs.get("stderr") is not subprocess.PIPE
 
 
 def test_openai_api_smoke() -> None:
