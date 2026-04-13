@@ -19,9 +19,11 @@ from aiinfra_e2e.config import (
     TrainConfig,
     load_yaml,
 )
+from aiinfra_e2e.train.sft import run_sft_from_paths
 
 app = typer.Typer(help="AIInfra E2E command line interface.")
 env_app = typer.Typer(help="Environment commands.")
+train_app = typer.Typer(help="Training commands.")
 
 
 class _StubConfig(BaseModel):
@@ -54,7 +56,9 @@ def _load_config(config_path: Path, model_cls: type[BaseModel]) -> BaseModel:
         raise typer.Exit(code=1) from exc
 
 
-def _handle_stub_command(command_name: str, config_path: Path | None, model_cls: type[BaseModel]) -> None:
+def _handle_stub_command(
+    command_name: str, config_path: Path | None, model_cls: type[BaseModel]
+) -> None:
     """Load config when provided and otherwise keep command behavior stubbed."""
 
     if config_path is None:
@@ -121,11 +125,41 @@ def data_command(config: ConfigOption = None) -> None:
     _handle_stub_command("Data", config, DataConfig)
 
 
-@app.command("train")
-def train_command(config: ConfigOption = None) -> None:
-    """Validate train config input for future training workflows."""
+@train_app.callback(invoke_without_command=True)
+def train_callback(
+    ctx: typer.Context,
+    config: ConfigOption = None,
+) -> None:
+    """Keep top-level train config validation available for backward compatibility."""
 
+    if ctx.invoked_subcommand is not None:
+        return
     _handle_stub_command("Train", config, TrainConfig)
+
+
+@train_app.command("sft")
+def train_sft_command(
+    data_config: Annotated[Path, typer.Option("--data-config", help="Path to data YAML config.")],
+    train_config: Annotated[
+        Path, typer.Option("--train-config", help="Path to train YAML config.")
+    ],
+    obs_config: Annotated[
+        Path, typer.Option("--obs-config", help="Path to observability YAML config.")
+    ],
+) -> None:
+    """Run TRL SFT fine-tuning with PEFT LoRA and optional QLoRA."""
+
+    for config_path in (data_config, train_config, obs_config):
+        if not config_path.exists() or not config_path.is_file():
+            typer.echo(f"Config file not found: {config_path}")
+            raise typer.Exit(code=1)
+
+    run_dir = run_sft_from_paths(
+        data_config_path=data_config,
+        train_config_path=train_config,
+        obs_config_path=obs_config,
+    )
+    typer.echo(f"Finished SFT run in {run_dir}")
 
 
 @app.command("eval")
@@ -157,6 +191,7 @@ def loadtest_command(config: ConfigOption = None) -> None:
 
 
 app.add_typer(env_app, name="env")
+app.add_typer(train_app, name="train")
 
 
 def main() -> None:

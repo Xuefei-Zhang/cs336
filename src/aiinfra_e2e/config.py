@@ -32,8 +32,19 @@ class DataConfig(StrictModel):
 
 class TrainConfig(StrictModel):
     model_id: str
-    output_dir: str = "artifacts/train"
+    output_dir: str = "artifacts/runs"
+    run_name: str | None = None
     seed: int = 42
+    max_steps: int = 100
+    per_device_train_batch_size: int = 1
+    gradient_accumulation_steps: int = 1
+    learning_rate: float = 2e-4
+    logging_steps: int = 1
+    gradient_checkpointing: bool = True
+    lora_r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
+    lora_target_modules: str | list[str] | None = "all-linear"
 
 
 class EvalConfig(StrictModel):

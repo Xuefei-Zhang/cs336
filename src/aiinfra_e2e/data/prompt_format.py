@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
 
@@ -17,6 +17,16 @@ class ChatTemplateTokenizer(Protocol):
         tokenize: bool = False,
         add_generation_prompt: bool = False,
     ) -> str: ...
+
+
+def has_configured_chat_template(tokenizer: Any | None) -> bool:
+    """Return whether the tokenizer can safely render chat templates."""
+
+    if tokenizer is None or not hasattr(tokenizer, "apply_chat_template"):
+        return False
+    if not hasattr(tokenizer, "chat_template"):
+        return True
+    return bool(getattr(tokenizer, "chat_template"))
 
 
 def _build_user_content(instruction: str, input_text: str | None = None) -> str:
@@ -48,8 +58,8 @@ def build_messages(
 def render_prompt(messages: list[Message], *, tokenizer: Any | None = None) -> str:
     """Render chat messages to text, preferring tokenizer chat templates when available."""
 
-    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
-        template_tokenizer = tokenizer
+    if has_configured_chat_template(tokenizer):
+        template_tokenizer = cast(ChatTemplateTokenizer, tokenizer)
         return template_tokenizer.apply_chat_template(
             messages,
             tokenize=False,

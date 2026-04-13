@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any, TypedDict, cast
 
-from aiinfra_e2e.data.prompt_format import Message, build_messages, render_prompt
+from aiinfra_e2e.data.prompt_format import (
+    Message,
+    build_messages,
+    has_configured_chat_template,
+    render_prompt,
+)
 
 
 class SFTRecord(TypedDict):
@@ -22,7 +27,7 @@ def _tokenize_text(tokenizer: Any, text: str) -> list[int]:
 
 def _build_user_prefix(messages: list[Message], *, tokenizer: Any) -> list[int]:
     prompt_messages = messages[:-1]
-    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
+    if has_configured_chat_template(tokenizer):
         prefix_ids = tokenizer.apply_chat_template(
             prompt_messages,
             tokenize=True,
