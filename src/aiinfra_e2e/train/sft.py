@@ -34,6 +34,10 @@ from aiinfra_e2e.data.split import deterministic_split
 from aiinfra_e2e.logging import configure_logging
 from aiinfra_e2e.manifest import JsonValue, write_run_manifest
 from aiinfra_e2e.train.accelerate import get_accelerate_runtime, wait_for_everyone
+from aiinfra_e2e.train.checkpointing import (
+    next_oom_retry_config,
+    resolve_resume_checkpoint,
+)
 from aiinfra_e2e.train.qlora import build_lora_config, build_quantization_config
 
 CPU_SMOKE_MODEL_ID = "sshleifer/tiny-gpt2"
@@ -271,12 +275,13 @@ def _build_training_args(train_config: TrainConfig, run_dir: Path) -> SFTConfig:
         gradient_accumulation_steps=train_config.gradient_accumulation_steps,
         learning_rate=train_config.learning_rate,
         logging_steps=train_config.logging_steps,
-        save_strategy="no",
+        save_strategy="steps",
+        save_steps=train_config.save_steps,
         report_to="none",
         remove_unused_columns=False,
         label_names=["labels"],
         dataset_text_field="text",
-        max_length=None,
+        max_length=train_config.max_seq_len,
         packing=False,
         use_cpu=use_cpu,
         fp16=False,
@@ -284,6 +289,45 @@ def _build_training_args(train_config: TrainConfig, run_dir: Path) -> SFTConfig:
         gradient_checkpointing=train_config.gradient_checkpointing,
         ddp_find_unused_parameters=False if get_accelerate_runtime().num_processes > 1 else None,
     )
+
+
+def _is_cuda_oom(exc: BaseException) -> bool:
+    return torch.cuda.is_available() and isinstance(exc, torch.cuda.OutOfMemoryError)
+
+
+def _train_once(
+    *,
+    data_config: DataConfig,
+    train_config: TrainConfig,
+    cache_dir: Path,
+    resolved_model_id: str,
+    run_dir: Path,
+) -> tuple[float, bool, str | None, Dataset]:
+    tokenizer = _load_tokenizer(resolved_model_id, cache_dir=cache_dir)
+    dataset = _load_training_dataset(data_config)
+    train_dataset = _prepare_train_split(dataset, data_config=data_config, tokenizer=tokenizer)
+
+    qlora_enabled = _should_enable_qlora()
+    model = _load_model(
+        resolved_model_id,
+        cache_dir=cache_dir,
+        qlora_enabled=qlora_enabled,
+        gradient_checkpointing=train_config.gradient_checkpointing,
+    )
+    training_args = _build_training_args(train_config, run_dir)
+    trainer = SFTTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        processing_class=tokenizer,
+        data_collator=SupervisedDataCollator(tokenizer),
+        peft_config=build_lora_config(train_config),
+    )
+    resume_checkpoint = resolve_resume_checkpoint(run_dir, train_config)
+    train_result = trainer.train(resume_from_checkpoint=resume_checkpoint)
+    final_loss = float(cast(float, train_result.training_loss))
+    trainer.save_model(str(run_dir / "lora_adapter"))
+    return final_loss, qlora_enabled, resume_checkpoint, train_dataset
 
 
 def _log_mlflow_run(
@@ -322,36 +366,44 @@ def run_sft(
     resolved_model_id = _resolve_model_id(train_config)
     run_id = _resolve_run_id(train_config)
     run_dir = Path(train_config.output_dir) / run_id
-    adapter_dir = run_dir / "lora_adapter"
     log_path = run_dir / "train.log"
     _ = run_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = _resolve_model_cache_dir(data_config=data_config, train_config=train_config)
+    retry_decisions: list[str] = []
 
     with _override_hf_cache_env(cache_dir):
-        tokenizer = _load_tokenizer(resolved_model_id, cache_dir=cache_dir)
-        dataset = _load_training_dataset(data_config)
-        train_dataset = _prepare_train_split(dataset, data_config=data_config, tokenizer=tokenizer)
-
-        qlora_enabled = _should_enable_qlora()
-        model = _load_model(
-            resolved_model_id,
-            cache_dir=cache_dir,
-            qlora_enabled=qlora_enabled,
-            gradient_checkpointing=train_config.gradient_checkpointing,
-        )
-        training_args = _build_training_args(train_config, run_dir)
-        trainer = SFTTrainer(
-            model=model,
-            args=training_args,
-            train_dataset=train_dataset,
-            processing_class=tokenizer,
-            data_collator=SupervisedDataCollator(tokenizer),
-            peft_config=build_lora_config(train_config),
-        )
-
-        train_result = trainer.train()
-        final_loss = float(cast(float, train_result.training_loss))
-        trainer.save_model(str(adapter_dir))
+        active_train_config = train_config
+        retry_attempt = 0
+        while True:
+            try:
+                final_loss, qlora_enabled, resumed_from, train_dataset = _train_once(
+                    data_config=data_config,
+                    train_config=active_train_config,
+                    cache_dir=cache_dir,
+                    resolved_model_id=resolved_model_id,
+                    run_dir=run_dir,
+                )
+                break
+            except BaseException as exc:
+                if not _is_cuda_oom(exc):
+                    raise
+                if retry_attempt >= train_config.oom_retries:
+                    raise
+                next_config, decision = next_oom_retry_config(active_train_config)
+                if next_config is None or decision is None:
+                    raise
+                retry_attempt += 1
+                active_train_config = next_config
+                retry_decisions.append(decision)
+                logger.warning(
+                    "CUDA OOM while training run %s; retry %s/%s. %s",
+                    run_id,
+                    retry_attempt,
+                    train_config.oom_retries,
+                    decision,
+                )
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
     wait_for_everyone()
 
     manifest_path = write_run_manifest(
@@ -371,6 +423,8 @@ def run_sft(
             "qlora_enabled": qlora_enabled,
             "num_train_rows": len(train_dataset),
             "final_loss": final_loss,
+            "resumed_from_checkpoint": resumed_from,
+            "oom_fallbacks": retry_decisions,
         }
         _ = log_path.write_text(
             json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
