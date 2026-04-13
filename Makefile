@@ -18,10 +18,10 @@ e2e:
 	@printf 'E2E target placeholder\n'
 
 obs-up:
-	@printf 'Observability up placeholder\n'
+	docker compose -f docker/compose.yaml up -d
 
 obs-down:
-	@printf 'Observability down placeholder\n'
+	docker compose -f docker/compose.yaml down
 
 serve:
 	@printf 'Serve target placeholder\n'
