@@ -6,7 +6,7 @@ import json
 import platform
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, cast
 
 import typer
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -19,6 +19,7 @@ from aiinfra_e2e.config import (
     TrainConfig,
     load_yaml,
 )
+from aiinfra_e2e.serve import run_vllm_server_from_config
 from aiinfra_e2e.train.sft import run_sft_from_paths
 
 app = typer.Typer(help="AIInfra E2E command line interface.")
@@ -171,9 +172,15 @@ def eval_command(config: ConfigOption = None) -> None:
 
 @app.command("serve")
 def serve_command(config: ConfigOption = None) -> None:
-    """Validate serve config input for future serving workflows."""
+    """Validate serve config and start the vLLM wrapper."""
 
-    _handle_stub_command("Serve", config, ServeConfig)
+    if config is None:
+        typer.echo("Serve command stub. Provide --config to start a YAML-configured server.")
+        return
+
+    serve_config = cast(ServeConfig, _load_config(config, ServeConfig))
+    typer.echo(f"Started serve wrapper from {config}")
+    run_vllm_server_from_config(serve_config)
 
 
 @app.command("obs")
