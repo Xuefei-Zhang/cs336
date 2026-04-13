@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aiinfra-e2e"
+version = "0.1.0"
+description = "Greenfield AI infra end-to-end learning repository"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Sisyphus" },
+]
+dependencies = [
+  "torch",
+  "transformers",
+  "datasets",
+  "accelerate",
+  "peft",
+  "trl",
+  "bitsandbytes",
+  "mlflow",
+  "prometheus-client",
+  "fastapi",
+  "uvicorn",
+  "vllm",
+  "typer",
+  "ruff",
+  "pytest",
+  "pyyaml",
+  "pydantic",
+]
+
+[project.scripts]
+aiinfra-e2e = "aiinfra_e2e.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
