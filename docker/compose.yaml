@@ -1,0 +1,55 @@
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.12.2
+    command:
+      - mlflow
+      - server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --backend-store-uri
+      - sqlite:///mlflow.db
+      - --artifacts-destination
+      - /mlflow/artifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_backend:/mlflow
+      - mlflow_artifacts:/mlflow/artifacts
+    working_dir: /mlflow
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    entrypoint:
+      - /bin/sh
+      - /etc/prometheus/render-and-run.sh
+    environment:
+      WRAPPER_METRICS_TARGET: ${WRAPPER_METRICS_TARGET:-host.docker.internal:9100}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/render-and-run.sh:/etc/prometheus/render-and-run.sh:ro
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  mlflow_backend:
+  mlflow_artifacts:
