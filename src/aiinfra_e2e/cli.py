@@ -21,7 +21,6 @@ from aiinfra_e2e.config import (
     load_yaml,
 )
 from aiinfra_e2e.serve import run_vllm_server_from_config
-from aiinfra_e2e.train.sft import run_sft_from_paths
 
 app = typer.Typer(help="AIInfra E2E command line interface.")
 env_app = typer.Typer(help="Environment commands.")
@@ -150,6 +149,8 @@ def train_sft_command(
     ],
 ) -> None:
     """Run TRL SFT fine-tuning with PEFT LoRA and optional QLoRA."""
+
+    from aiinfra_e2e.train.sft import run_sft_from_paths
 
     for config_path in (data_config, train_config, obs_config):
         if not config_path.exists() or not config_path.is_file():
