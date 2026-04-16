@@ -1,4 +1,4 @@
-PYTHON ?= python
+PYTHON := .venv/bin/python
 SERVE_CONFIG ?= configs/serve/vllm_openai_lora.yaml
 LOADTEST_CONFIG ?= configs/serve/loadtest.yaml
 LOADTEST_HOST ?=
@@ -11,22 +11,31 @@ LOADTEST_MODEL ?=
 LOADTEST_HTML_REPORT ?=
 LOADTEST_JSON_REPORT ?=
 
-.PHONY: setup lint test smoke e2e obs-up obs-down serve loadtest
+.PHONY: ensure-venv setup lint test smoke e2e obs-up obs-down serve loadtest
 
-setup:
+ensure-venv:
+	@if [ ! -x "$(PYTHON)" ]; then \
+		printf 'Missing project virtualenv Python: %s\n' "$(PYTHON)"; \
+		printf 'Create it first, for example:\n'; \
+		printf '  python3 -m venv .venv\n'; \
+		printf '  .venv/bin/python -m pip install -U pip\n'; \
+		exit 1; \
+	fi
+
+setup: ensure-venv
 	$(PYTHON) -m pip install -e .
 
-lint:
-	ruff check .
+lint: ensure-venv
+	$(PYTHON) -m ruff check .
 
-test:
-	pytest -q
+test: ensure-venv
+	$(PYTHON) -m pytest -q
 
-smoke:
-	bash scripts/smoke_cpu.sh
+smoke: ensure-venv
+	PYTHON_BIN="$(PYTHON)" bash scripts/smoke_cpu.sh
 
-e2e:
-	bash scripts/e2e_gpu.sh
+e2e: ensure-venv
+	PYTHON_BIN="$(PYTHON)" bash scripts/e2e_gpu.sh
 
 obs-up:
 	docker compose -f docker/compose.yaml up -d
@@ -34,10 +43,10 @@ obs-up:
 obs-down:
 	docker compose -f docker/compose.yaml down
 
-serve:
+serve: ensure-venv
 	$(PYTHON) -m aiinfra_e2e.cli serve --config $(SERVE_CONFIG)
 
-loadtest:
+loadtest: ensure-venv
 	@if ! $(PYTHON) -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('locust') else 1)"; then \
 		printf 'Skipping loadtest: locust is not installed in the active Python environment.\n'; \
 		printf 'Install locust and set LOADTEST_HOST to run scripts/loadtest_locust.py.\n'; \

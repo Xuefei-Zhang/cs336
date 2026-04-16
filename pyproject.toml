@@ -24,6 +24,7 @@ dependencies = [
   "fastapi",
   "uvicorn",
   "vllm",
+  "locust",
   "typer",
   "ruff",
   "pytest",
