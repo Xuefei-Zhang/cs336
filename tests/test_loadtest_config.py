@@ -48,6 +48,16 @@ def test_load_yaml_parses_loadtest_config(tmp_path: Path) -> None:
     }
 
 
+def test_serve_config_base_url_normalizes_wildcard_bind_hosts() -> None:
+    from aiinfra_e2e.config import ServeConfig
+
+    assert ServeConfig(host="0.0.0.0", port=1234, model_id="x").base_url == "http://127.0.0.1:1234"
+    assert ServeConfig(host="::", port=1234, model_id="x").base_url == "http://127.0.0.1:1234"
+    assert (
+        ServeConfig(host="localhost", port=1234, model_id="x").base_url == "http://localhost:1234"
+    )
+
+
 def test_report_paths_live_under_run_dir_and_are_logged_to_mlflow(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -102,7 +112,9 @@ def test_report_paths_live_under_run_dir_and_are_logged_to_mlflow(
         "endpoint": "/v1/chat/completions",
         "html_report": str(artifacts.html_report_path),
     }
-    _ = artifacts.json_report_path.write_text(__import__("json").dumps(summary) + "\n", encoding="utf-8")
+    _ = artifacts.json_report_path.write_text(
+        __import__("json").dumps(summary) + "\n", encoding="utf-8"
+    )
 
     log_loadtest_reports(config=config, artifacts=artifacts)
 

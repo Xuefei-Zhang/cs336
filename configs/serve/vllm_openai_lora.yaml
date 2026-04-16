@@ -1,7 +1,7 @@
 host: 0.0.0.0
 port: 8000
-model_id: meta-llama/Meta-Llama-3-8B-Instruct
-served_model_name: llama-openai
+model_id: Qwen/Qwen2.5-7B-Instruct
+served_model_name: qwen2.5-7b-instruct
 metrics_host: 127.0.0.1
 metrics_port: 9100
 tensor_parallel_size: 1

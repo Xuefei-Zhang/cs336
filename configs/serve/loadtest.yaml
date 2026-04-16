@@ -8,7 +8,7 @@ max_tokens: 64
 serve:
   host: 127.0.0.1
   port: 8000
-  served_model_name: llama-openai
+  served_model_name: qwen2.5-7b-instruct
 obs:
   tracking_uri: mlruns
   experiment_name: loadtest
