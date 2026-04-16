@@ -16,3 +16,8 @@
 - Final Verification Wave F3: manual QA on 2026-04-13 verified `python -m aiinfra_e2e.cli --help`, `bash scripts/smoke_cpu.sh`, and `docker compose -f docker/compose.yaml config` all completed successfully in the CPU environment; GPU-only execution remained unverified here, but the repo has explicit skip guards in `src/aiinfra_e2e/serve/vllm_server.py:get_vllm_smoke_skip_reason()` and `tests/test_openai_api_smoke.py` to avoid running vLLM smoke without CUDA, `vllm`, `nvidia-smi`, and `AIINFRA_E2E_VLLM_MODEL`.
 
 - Final Verification Wave F4: when plan DoD treats `make` as the single orchestrator, command-level success (`pytest`, `ruff`, editable install, compose config) is necessary but not sufficient; fidelity requires Makefile targets to execute the same real workflows that README/CI claim.
+
+## 2026-04-14 Task: e2e port conflict workaround
+- E2E now uses effective temp serve/loadtest configs so hosts with ports 8000 or 9100 already occupied can still run without changing checked-in defaults.
+- The workaround stays isolated to runtime config selection, preserving the committed serve/loadtest port settings for normal use.
+- This avoids brittle failures on shared machines while keeping repository defaults stable.
