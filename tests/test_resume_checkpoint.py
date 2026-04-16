@@ -132,6 +132,16 @@ def test_run_sft_resumes_from_latest_checkpoint_without_restarting(
     data_config, train_config, obs_config = _base_configs(tmp_path)
     dataset = _build_dataset()
     monkeypatch.setattr("aiinfra_e2e.train.sft.load_hf_dataset", lambda config: dataset)
+    monkeypatch.setattr("aiinfra_e2e.train.sft._load_tokenizer", lambda *args, **kwargs: _FakeTokenizer())
+    monkeypatch.setattr("aiinfra_e2e.train.sft._load_model", lambda *args, **kwargs: _FakeModel())
+    monkeypatch.setattr(
+        "aiinfra_e2e.train.sft._prepare_train_split",
+        lambda *args, **kwargs: _build_dataset(),
+    )
+    monkeypatch.setattr("aiinfra_e2e.train.sft.SFTTrainer", _ResumeTrainer)
+    monkeypatch.setattr("aiinfra_e2e.train.sft.SFTConfig", _DummyTrainingArgs)
+    monkeypatch.setattr("aiinfra_e2e.train.sft.build_lora_config", lambda config: None)
+    monkeypatch.setattr("aiinfra_e2e.train.sft._set_seed", lambda seed: None)
 
     config_path = tmp_path / "config.yaml"
     _ = config_path.write_text("placeholder: true\n", encoding="utf-8")
@@ -148,7 +158,9 @@ def test_run_sft_resumes_from_latest_checkpoint_without_restarting(
     checkpoint_one = run_dir / "checkpoint-1"
     assert checkpoint_one.exists()
 
-    original_training_step = sft_module.SFTTrainer.training_step
+    trainer_cls = sft_module.SFTTrainer
+    assert trainer_cls is not None
+    original_training_step = trainer_cls.training_step
     training_step_calls = 0
 
     def counting_training_step(self, *args, **kwargs):
@@ -157,7 +169,7 @@ def test_run_sft_resumes_from_latest_checkpoint_without_restarting(
         return original_training_step(self, *args, **kwargs)
 
     monkeypatch.setattr(
-        sft_module.SFTTrainer,
+        trainer_cls,
         "training_step",
         counting_training_step,
     )
@@ -231,6 +243,35 @@ class _DummyTrainingArgs:
             setattr(self, key, value)
 
 
+class _ResumeTrainResult:
+    training_loss = 0.125
+
+
+class _ResumeTrainer:
+    def __init__(self, *, args, **kwargs) -> None:
+        self.args = args
+
+    def training_step(self, *args, **kwargs) -> torch.Tensor:
+        return torch.tensor(0.0)
+
+    def train(self, resume_from_checkpoint=None):
+        _ = self.training_step()
+        if resume_from_checkpoint is None:
+            next_step = 1
+        else:
+            next_step = int(str(resume_from_checkpoint).rsplit("-", maxsplit=1)[1]) + 1
+        checkpoint_dir = Path(self.args.output_dir) / f"checkpoint-{next_step}"
+        _ = checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        _ = (checkpoint_dir / "trainer_state.json").write_text(
+            json.dumps({"global_step": next_step}),
+            encoding="utf-8",
+        )
+        return _ResumeTrainResult()
+
+    def save_model(self, output_dir: str) -> None:
+        _ = Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+
 def test_run_sft_retries_cuda_oom_with_bounded_fallback(tmp_path: Path, monkeypatch) -> None:
     data_config, train_config, obs_config = _base_configs(tmp_path)
     oom_train_config = train_config.model_copy(
@@ -259,6 +300,8 @@ def test_run_sft_retries_cuda_oom_with_bounded_fallback(tmp_path: Path, monkeypa
     )
     monkeypatch.setattr("aiinfra_e2e.train.sft.SFTTrainer", _FakeTrainer)
     monkeypatch.setattr("aiinfra_e2e.train.sft.SFTConfig", _DummyTrainingArgs)
+    monkeypatch.setattr("aiinfra_e2e.train.sft.build_lora_config", lambda config: None)
+    monkeypatch.setattr("aiinfra_e2e.train.sft._set_seed", lambda seed: None)
     monkeypatch.setattr("aiinfra_e2e.train.sft._should_enable_qlora", lambda: False)
     monkeypatch.setattr("aiinfra_e2e.train.sft.torch.cuda.is_available", lambda: True)
     monkeypatch.setattr("aiinfra_e2e.train.sft.torch.cuda.is_bf16_supported", lambda: False)

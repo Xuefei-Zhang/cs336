@@ -9,20 +9,12 @@ import sys
 from collections.abc import Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from datasets import Dataset
 import huggingface_hub.constants as hf_constants
 import mlflow
-from peft import prepare_model_for_kbit_training
 import torch
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-    set_seed,
-)
 import transformers.utils.hub as transformers_hub
 
 from aiinfra_e2e.config import DataConfig, ObsConfig, TrainConfig, load_yaml
@@ -37,17 +29,22 @@ from aiinfra_e2e.train.checkpointing import (
     next_oom_retry_config,
     resolve_resume_checkpoint,
 )
-from aiinfra_e2e.train.qlora import build_lora_config, build_quantization_config
-from aiinfra_e2e.train.trl_compat import SFTConfig, SFTTrainer
 
-CPU_SMOKE_MODEL_ID = "sshleifer/tiny-gpt2"
+if TYPE_CHECKING:
+    from transformers import PreTrainedModel
+
+SFTTrainer: Any | None = None
+SFTConfig: Any | None = None
+
+CPU_SMOKE_MODEL_ID = "hf-internal-testing/tiny-random-gpt2"
 CPU_SMOKE_ENV_VAR = "AIINFRA_E2E_CPU_SMOKE"
+CPU_SMOKE_MAX_LENGTH = 512
 
 
 class SupervisedDataCollator:
     """Pad pretokenized SFT records while preserving assistant-only labels."""
 
-    def __init__(self, tokenizer: PreTrainedTokenizerBase) -> None:
+    def __init__(self, tokenizer: Any) -> None:
         raw_pad_token_id = tokenizer.pad_token_id
         raw_eos_token_id = tokenizer.eos_token_id
         if isinstance(raw_pad_token_id, int):
@@ -96,6 +93,43 @@ def _resolve_run_id(train_config: TrainConfig) -> str:
 
 def _should_enable_qlora() -> bool:
     return torch.cuda.is_available() and (not _is_cpu_smoke_mode())
+
+
+def _resolve_training_max_length(train_config: TrainConfig) -> int | None:
+    if train_config.max_seq_len is None:
+        return CPU_SMOKE_MAX_LENGTH if _is_cpu_smoke_mode() else None
+    if _is_cpu_smoke_mode():
+        return min(train_config.max_seq_len, CPU_SMOKE_MAX_LENGTH)
+    return train_config.max_seq_len
+
+
+def _set_seed(seed: int) -> None:
+    from transformers import set_seed as transformers_set_seed
+
+    transformers_set_seed(seed)
+
+
+def _load_trl_objects() -> tuple[type[Any], type[Any]]:
+    global SFTConfig, SFTTrainer
+
+    if SFTTrainer is None or SFTConfig is None:
+        from aiinfra_e2e.train.trl_compat import load_trl_sft_objects
+
+        SFTTrainer, SFTConfig = load_trl_sft_objects()
+
+    return cast(tuple[type[Any], type[Any]], (SFTTrainer, SFTConfig))
+
+
+def build_lora_config(train_config: TrainConfig) -> Any:
+    from aiinfra_e2e.train.qlora import build_lora_config as build_peft_lora_config
+
+    return build_peft_lora_config(train_config)
+
+
+def build_quantization_config(*, enabled: bool) -> Any:
+    from aiinfra_e2e.train.qlora import build_quantization_config as build_peft_quantization_config
+
+    return build_peft_quantization_config(enabled=enabled)
 
 
 def _resolve_model_cache_dir(*, data_config: DataConfig, train_config: TrainConfig) -> Path:
@@ -206,7 +240,11 @@ def _load_training_dataset(data_config: DataConfig) -> Dataset:
 
 
 def _prepare_train_split(
-    dataset: Dataset, *, data_config: DataConfig, tokenizer: PreTrainedTokenizerBase
+    dataset: Dataset,
+    *,
+    data_config: DataConfig,
+    train_config: TrainConfig,
+    tokenizer: Any,
 ) -> Dataset:
     split_result = deterministic_split(
         dataset,
@@ -227,10 +265,21 @@ def _prepare_train_split(
         ),
         remove_columns=original_columns,
     )
+    max_length = _resolve_training_max_length(train_config)
+    if max_length is not None:
+        processed = processed.map(
+            lambda record: {
+                **record,
+                "input_ids": record["input_ids"][:max_length],
+                "labels": record["labels"][:max_length],
+            }
+        )
     return processed.select_columns(["input_ids", "labels", data_config.text_field])
 
 
-def _load_tokenizer(model_id: str, *, cache_dir: Path) -> PreTrainedTokenizerBase:
+def _load_tokenizer(model_id: str, *, cache_dir: Path) -> Any:
+    from transformers import AutoTokenizer
+
     tokenizer = AutoTokenizer.from_pretrained(model_id, cache_dir=str(cache_dir))
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -244,6 +293,8 @@ def _load_model(
     qlora_enabled: bool,
     gradient_checkpointing: bool,
 ) -> PreTrainedModel:
+    from transformers import AutoModelForCausalLM
+
     runtime = get_accelerate_runtime()
     quantization_config = build_quantization_config(enabled=qlora_enabled)
     model_kwargs: dict[str, object] = {}
@@ -256,12 +307,14 @@ def _load_model(
             torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         )
 
-    model = cast(PreTrainedModel, AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs))
+    model = cast("PreTrainedModel", AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs))
     model.config.use_cache = False
 
     if quantization_config is not None:
+        from peft import prepare_model_for_kbit_training
+
         model = cast(
-            PreTrainedModel,
+            "PreTrainedModel",
             prepare_model_for_kbit_training(
                 model,
                 use_gradient_checkpointing=gradient_checkpointing,
@@ -274,8 +327,9 @@ def _load_model(
 def _build_training_args(
     train_config: TrainConfig, run_dir: Path, *, dataset_text_field: str
 ) -> Any:
+    _, sft_config_cls = _load_trl_objects()
     use_cpu = not torch.cuda.is_available()
-    return SFTConfig(
+    return sft_config_cls(
         output_dir=str(run_dir),
         run_name=_resolve_run_id(train_config),
         seed=train_config.seed,
@@ -290,7 +344,7 @@ def _build_training_args(
         remove_unused_columns=False,
         label_names=["labels"],
         dataset_text_field=dataset_text_field,
-        max_length=train_config.max_seq_len,
+        max_length=_resolve_training_max_length(train_config),
         packing=False,
         use_cpu=use_cpu,
         fp16=False,
@@ -312,9 +366,15 @@ def _train_once(
     resolved_model_id: str,
     run_dir: Path,
 ) -> tuple[float, bool, str | None, Dataset]:
+    trainer_cls, _ = _load_trl_objects()
     tokenizer = _load_tokenizer(resolved_model_id, cache_dir=cache_dir)
     dataset = _load_training_dataset(data_config)
-    train_dataset = _prepare_train_split(dataset, data_config=data_config, tokenizer=tokenizer)
+    train_dataset = _prepare_train_split(
+        dataset,
+        data_config=data_config,
+        train_config=train_config,
+        tokenizer=tokenizer,
+    )
 
     qlora_enabled = _should_enable_qlora()
     model = _load_model(
@@ -328,7 +388,7 @@ def _train_once(
         run_dir,
         dataset_text_field=data_config.text_field,
     )
-    trainer = SFTTrainer(
+    trainer = trainer_cls(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
@@ -375,7 +435,7 @@ def run_sft(
     """Execute supervised fine-tuning and return the created run directory."""
 
     runtime = get_accelerate_runtime()
-    set_seed(train_config.seed)
+    _set_seed(train_config.seed)
     logger = configure_logging()
 
     resolved_model_id = _resolve_model_id(train_config)
