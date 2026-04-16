@@ -75,6 +75,7 @@ class LoRAAdapterConfig(StrictModel):
 class ServeConfig(StrictModel):
     host: str = "0.0.0.0"
     port: int = 8000
+    startup_timeout_seconds: float = 180.0
     model_id: str | None = None
     served_model_name: str | None = None
     metrics_host: str = "127.0.0.1"
@@ -89,7 +90,8 @@ class ServeConfig(StrictModel):
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.host}:{self.port}"
+        client_host = "127.0.0.1" if self.host in {"0.0.0.0", "::", ""} else self.host
+        return f"http://{client_host}:{self.port}"
 
 
 class ObsConfig(StrictModel):

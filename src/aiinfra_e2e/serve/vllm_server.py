@@ -9,11 +9,12 @@ import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, cast
-from urllib import request
+from urllib import request, parse
 from urllib.error import HTTPError, URLError
 
 from aiinfra_e2e.config import ServeConfig
@@ -23,6 +24,13 @@ from aiinfra_e2e.serve.metrics import ServeMetrics
 def build_vllm_environment(config: ServeConfig) -> dict[str, str]:
     del config
     env = dict(os.environ)
+    repo_root = Path(__file__).resolve().parents[3]
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{repo_root}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else str(repo_root)
+    )
+    env["AIINFRA_E2E_ENABLE_VLLM_TOKENIZER_COMPAT"] = "1"
+    env["AIINFRA_E2E_ENABLE_VLLM_TQDM_COMPAT"] = "1"
     env["VLLM_ALLOW_RUNTIME_LORA_UPDATING"] = "True"
     return env
 
@@ -70,6 +78,11 @@ def _json_request(
     return request.Request(url, data=body, headers=headers, method=method)
 
 
+def _is_localhost_url(base_url: str) -> bool:
+    host = parse.urlparse(base_url).hostname
+    return host in {"localhost", "127.0.0.1", "0.0.0.0"}
+
+
 def openai_request(
     base_url: str,
     path: str,
@@ -79,7 +92,12 @@ def openai_request(
     timeout: float = 5.0,
 ) -> dict[str, Any]:
     http_request = _json_request(f"{base_url.rstrip('/')}{path}", payload=payload, method=method)
-    with request.urlopen(http_request, timeout=timeout) as response:
+    if _is_localhost_url(base_url):
+        opener = request.build_opener(request.ProxyHandler({}))
+        response_context = opener.open(http_request, timeout=timeout)
+    else:
+        response_context = request.urlopen(http_request, timeout=timeout)
+    with response_context as response:
         raw = response.read().decode("utf-8")
     if not raw:
         return {}
@@ -127,7 +145,7 @@ class ManagedVLLMServer:
             env=build_vllm_environment(self.config),
             text=True,
         )
-        self.wait_until_ready()
+        self.wait_until_ready(timeout=self.config.startup_timeout_seconds)
 
     def wait_until_ready(self, timeout: float = 60.0) -> None:
         deadline = time.time() + timeout

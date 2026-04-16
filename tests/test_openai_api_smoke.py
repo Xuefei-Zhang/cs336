@@ -1,9 +1,13 @@
 import json
+import importlib
 import os
 import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
+from typing import Any, cast
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request
 
@@ -33,6 +37,29 @@ def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
+
+
+def _start_models_server() -> tuple[HTTPServer, threading.Thread, int]:
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path != "/v1/models":
+                self.send_response(404)
+                self.end_headers()
+                return
+            body = json.dumps({"data": [{"id": "smoke-model"}]}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:  # pragma: no cover - noise only
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, int(server.server_address[1])
 
 
 def test_load_yaml_parses_vllm_lora_serve_config(tmp_path: Path) -> None:
@@ -95,7 +122,79 @@ def test_build_vllm_command_enables_openai_server_and_runtime_lora() -> None:
     assert "4" in command
     assert "--max-lora-rank" in command
     assert "32" in command
+    assert env["AIINFRA_E2E_ENABLE_VLLM_TOKENIZER_COMPAT"] == "1"
+    assert env["AIINFRA_E2E_ENABLE_VLLM_TQDM_COMPAT"] == "1"
     assert env["VLLM_ALLOW_RUNTIME_LORA_UPDATING"] == "True"
+    expected_repo_root = str(Path(__file__).resolve().parents[1])
+    assert env["PYTHONPATH"].split(os.pathsep)[0] == expected_repo_root
+
+
+def test_qwen2_tokenizer_shim_adds_all_special_tokens_extended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import transformers
+
+    from aiinfra_e2e.serve.tokenizer_compat import ensure_all_special_tokens_extended
+
+    class _FakeTokenizerBase:
+        pass
+
+    class _TokenizerWithoutCompat(_FakeTokenizerBase):
+        @property
+        def all_special_tokens(self) -> list[str]:
+            return ["<bos>", "<eos>"]
+
+    monkeypatch.setattr(transformers, "PreTrainedTokenizerBase", _FakeTokenizerBase)
+    tokenizer = _TokenizerWithoutCompat()
+    tokenizer_any = cast(Any, tokenizer)
+    tokenizer_base_any = cast(Any, _FakeTokenizerBase)
+
+    with pytest.raises(AttributeError, match="all_special_tokens_extended"):
+        _ = tokenizer_any.all_special_tokens_extended
+
+    ensure_all_special_tokens_extended()
+
+    assert isinstance(tokenizer_base_any.all_special_tokens_extended, property)
+    assert tokenizer_any.all_special_tokens_extended == list(tokenizer.all_special_tokens)
+
+
+def test_vllm_tqdm_compat_patches_duplicate_disable_constructor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aiinfra_e2e.serve.tqdm_compat import ensure_vllm_tqdm_compat
+
+    class _BaseTqdm:
+        def __init__(self, *args: object, disable: bool = False, **kwargs: object) -> None:
+            self.disable = disable
+
+        def close(self) -> None:
+            return None
+
+    class _BrokenDisabledTqdm(_BaseTqdm):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs, disable=True)
+
+    class _WeightUtilsModule:
+        DisabledTqdm = _BrokenDisabledTqdm
+
+    original_import_module = importlib.import_module
+
+    def _fake_import_module(name: str, package: str | None = None):
+        if name == "vllm.model_executor.model_loader.weight_utils":
+            return _WeightUtilsModule
+        return original_import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _fake_import_module)
+
+    with pytest.raises(TypeError, match="multiple values for keyword argument 'disable'"):
+        _BrokenDisabledTqdm(total=1, disable=False)
+
+    ensure_vllm_tqdm_compat()
+
+    progress = _BrokenDisabledTqdm(total=1, disable=False)
+    progress.close()
+
+    assert progress.disable is True
 
 
 def test_adapter_request_helpers_build_expected_payloads() -> None:
@@ -196,7 +295,11 @@ def test_serve_command_runs_wrapper_from_config(
     def _fake_run(config: ServeConfig) -> None:
         calls.append(config)
 
-    monkeypatch.setattr("aiinfra_e2e.cli.run_vllm_server_from_config", _fake_run)
+    serve_callback = next(
+        command.callback for command in app.registered_commands if command.name == "serve"
+    )
+    assert serve_callback is not None
+    monkeypatch.setitem(serve_callback.__globals__, "run_vllm_server_from_config", _fake_run)
 
     result = runner.invoke(app, ["serve", "--config", str(config_path)])
 
@@ -232,10 +335,14 @@ def test_managed_vllm_server_start_does_not_pipe_child_output(
         metrics_host="127.0.0.1",
         metrics_port=_free_port(),
     )
-    server = ManagedVLLMServer(config)
+    server = ManagedVLLMServer(config, metrics=ServeMetrics(registry=CollectorRegistry()))
     monkeypatch.setattr(server.metrics, "start_server", lambda host, port: None)
     monkeypatch.setattr(server.metrics, "update_gpu_memory", lambda: None)
-    monkeypatch.setattr(ManagedVLLMServer, "wait_until_ready", lambda self: None)
+    monkeypatch.setattr(
+        ManagedVLLMServer,
+        "wait_until_ready",
+        lambda self, timeout=60.0: None,
+    )
 
     def _fake_popen(*args: object, **kwargs: object) -> _Process:
         captured["args"] = args
@@ -250,6 +357,41 @@ def test_managed_vllm_server_start_does_not_pipe_child_output(
     assert isinstance(kwargs, dict)
     assert kwargs.get("stdout") is not subprocess.PIPE
     assert kwargs.get("stderr") is not subprocess.PIPE
+
+
+def test_managed_vllm_server_start_uses_configured_startup_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aiinfra_e2e.serve.vllm_server import ManagedVLLMServer
+
+    class _Process:
+        def poll(self) -> None:
+            return None
+
+    captured: dict[str, object] = {}
+    config = ServeConfig(
+        host="127.0.0.1",
+        port=_free_port(),
+        model_id="meta-llama/Meta-Llama-3-8B-Instruct",
+        metrics_host="127.0.0.1",
+        metrics_port=_free_port(),
+    )
+    server = ManagedVLLMServer(config, metrics=ServeMetrics(registry=CollectorRegistry()))
+    monkeypatch.setattr(server.metrics, "start_server", lambda host, port: None)
+    monkeypatch.setattr(server.metrics, "update_gpu_memory", lambda: None)
+
+    def _fake_wait_until_ready(timeout: float = 60.0) -> None:
+        captured["timeout"] = timeout
+
+    def _fake_popen(*args: object, **kwargs: object) -> _Process:
+        return _Process()
+
+    monkeypatch.setattr(server, "wait_until_ready", _fake_wait_until_ready)
+    monkeypatch.setattr("aiinfra_e2e.serve.vllm_server.subprocess.Popen", _fake_popen)
+
+    server.start()
+
+    assert captured["timeout"] == 180.0
 
 
 def test_openai_api_smoke() -> None:
@@ -292,3 +434,47 @@ def test_openai_api_smoke() -> None:
         pytest.fail(exc.read().decode("utf-8"))
     finally:
         server.stop()
+
+
+def test_openai_request_bypasses_proxy_for_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aiinfra_e2e.serve.vllm_server import openai_request
+
+    server, thread, port = _start_models_server()
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.delenv("no_proxy", raising=False)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+
+    try:
+        response = openai_request(f"http://127.0.0.1:{port}", "/v1/models")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5.0)
+
+    assert response == {"data": [{"id": "smoke-model"}]}
+
+
+def test_openai_request_uses_normalized_base_url_for_wildcard_bind_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aiinfra_e2e.config import ServeConfig
+    from aiinfra_e2e.serve.vllm_server import openai_request
+
+    server, thread, port = _start_models_server()
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.delenv("no_proxy", raising=False)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+
+    config = ServeConfig(host="0.0.0.0", port=port, model_id="smoke-model")
+
+    try:
+        response = openai_request(config.base_url, "/v1/models")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5.0)
+
+    assert config.base_url == f"http://127.0.0.1:{port}"
+    assert response == {"data": [{"id": "smoke-model"}]}
