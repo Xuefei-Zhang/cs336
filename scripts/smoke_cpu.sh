@@ -4,14 +4,9 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 PYTHON_BIN=${PYTHON_BIN:-python}
-CLI_BIN=${CLI_BIN:-aiinfra-e2e}
 
 run_cli() {
-  if command -v "$CLI_BIN" >/dev/null 2>&1; then
-    "$CLI_BIN" "$@"
-  else
-    "$PYTHON_BIN" -m aiinfra_e2e.cli "$@"
-  fi
+  "$PYTHON_BIN" -m aiinfra_e2e.cli "$@"
 }
 
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/aiinfra-e2e-smoke.XXXXXX")
