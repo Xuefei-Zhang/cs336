@@ -58,6 +58,29 @@ bash scripts/e2e_gpu.sh
 
 `e2e_gpu.sh` runs the stages in order: data sync, preprocess sample, train, offline eval, `serve --config`, and a headless Locust load test that writes HTML/JSON reports under the configured `output_dir`.
 
+### Hugging Face host configuration notes
+
+On the current GPU host, the verified Hugging Face environment looked like this:
+
+- `HF_ENDPOINT=https://hf-mirror.com`
+- `HF_HOME=/mnt/vtg_dataset/LLM`
+- `hf auth whoami` reported `Not logged in`
+
+`make e2e` still completed successfully in that setup because the checked-in scripts do not rely on a pre-existing local login for these public assets:
+
+- model: `Qwen/Qwen2.5-7B-Instruct`
+- dataset: `hfl/alpaca_zh_51k`
+
+At runtime, `scripts/e2e_gpu.sh` preserves `HF_HOME` if it is already set, but it pins the actual cache directories used by the run to project-owned paths unless you override them explicitly:
+
+- `HF_HUB_CACHE=artifacts/hf-cache/hub`
+- `HF_DATASETS_CACHE=artifacts/hf-cache/datasets`
+- `TRANSFORMERS_CACHE=artifacts/hf-cache/transformers`
+
+That split is intentional: it lets the host keep its existing Hugging Face home directory while making the repo's downloads and dataset cache locations predictable and writable for the demo run.
+
+If you need to use gated assets, export a valid Hugging Face token before running `make e2e`. If you want a different cache layout, override `HF_HOME`, `HF_HUB_CACHE`, `HF_DATASETS_CACHE`, and `TRANSFORMERS_CACHE` in the shell before invoking the script.
+
 ## Observability
 
 Start the wrapper metrics endpoint first so Prometheus has something to scrape, then bring up the observability stack:
