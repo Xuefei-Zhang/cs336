@@ -1,0 +1,25 @@
+{
+  "title": "cs336 repo walkthrough",
+  "landing": "README.md",
+  "sidebar": [
+    {
+      "title": "Start Here",
+      "items": [
+        { "file": "README.md", "title": "Review Docs Index" },
+        { "file": "make-e2e-overview.md", "title": "make e2e overview" },
+        { "file": "make-e2e-codepath-review.md", "title": "make e2e codepath review" },
+        { "file": "repo-structure-map.md", "title": "repo structure map" }
+      ]
+    },
+    {
+      "title": "Deep Dives",
+      "items": [
+        { "file": "serve-vllm-deep-dive.md", "title": "serve / vLLM deep dive" },
+        { "file": "manual-serve-command-codepath-review.md", "title": "manual serve command codepath review" },
+        { "file": "train-sft-deep-dive.md", "title": "train / SFT deep dive" },
+        { "file": "loadtest-deep-dive.md", "title": "loadtest deep dive" },
+        { "file": "inference-metrics-codepath-review.md", "title": "inference metrics codepath review" }
+      ]
+    }
+  ]
+}

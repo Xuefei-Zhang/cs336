@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>cs336 repo walkthrough</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f172a;
+        --panel: #111827;
+        --panel-2: #1f2937;
+        --text: #e5e7eb;
+        --muted: #94a3b8;
+        --accent: #60a5fa;
+        --border: #334155;
+        --code: #0b1220;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .app {
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr);
+        min-height: 100vh;
+      }
+      .sidebar {
+        background: var(--panel);
+        border-right: 1px solid var(--border);
+        padding: 1rem;
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        overflow-y: auto;
+      }
+      .brand {
+        margin-bottom: 1rem;
+      }
+      .brand h1 {
+        margin: 0 0 0.25rem;
+        font-size: 1.1rem;
+      }
+      .brand p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      .controls {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+      }
+      button,
+      input {
+        border-radius: 0.6rem;
+        border: 1px solid var(--border);
+        background: var(--panel-2);
+        color: var(--text);
+        padding: 0.7rem 0.85rem;
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      #search {
+        width: 100%;
+        margin-bottom: 1rem;
+      }
+      .nav-section {
+        margin: 1rem 0;
+      }
+      .nav-section h2 {
+        color: var(--muted);
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin: 0 0 0.55rem;
+      }
+      .nav-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.35rem;
+      }
+      .nav-link {
+        display: block;
+        color: var(--text);
+        text-decoration: none;
+        padding: 0.6rem 0.7rem;
+        border-radius: 0.6rem;
+      }
+      .nav-link:hover,
+      .nav-link.active {
+        background: rgba(96, 165, 250, 0.15);
+        color: #dbeafe;
+      }
+      .content-wrap {
+        min-width: 0;
+      }
+      .topbar {
+        display: none;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.9rem 1rem;
+        border-bottom: 1px solid var(--border);
+        background: rgba(15, 23, 42, 0.95);
+        position: sticky;
+        top: 0;
+        backdrop-filter: blur(12px);
+        z-index: 5;
+      }
+      main {
+        max-width: 980px;
+        padding: 2rem min(4vw, 2rem) 4rem;
+        margin: 0 auto;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin-bottom: 1.25rem;
+      }
+      .markdown-body h1,
+      .markdown-body h2,
+      .markdown-body h3,
+      .markdown-body h4 {
+        line-height: 1.2;
+      }
+      .markdown-body p,
+      .markdown-body li {
+        line-height: 1.7;
+      }
+      .markdown-body a {
+        color: var(--accent);
+      }
+      .markdown-body code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        background: rgba(148, 163, 184, 0.12);
+        padding: 0.15rem 0.35rem;
+        border-radius: 0.35rem;
+      }
+      .markdown-body pre {
+        background: var(--code);
+        border: 1px solid var(--border);
+        border-radius: 0.8rem;
+        padding: 1rem;
+        overflow-x: auto;
+      }
+      .markdown-body pre code {
+        background: transparent;
+        padding: 0;
+      }
+      .markdown-body blockquote {
+        margin: 1rem 0;
+        border-left: 4px solid var(--accent);
+        padding: 0.2rem 1rem;
+        color: #cbd5e1;
+        background: rgba(96, 165, 250, 0.08);
+      }
+      .markdown-body img {
+        max-width: 100%;
+        border-radius: 0.8rem;
+        border: 1px solid var(--border);
+        background: white;
+      }
+      .empty {
+        color: var(--muted);
+        font-style: italic;
+      }
+      @media (max-width: 960px) {
+        .app {
+          grid-template-columns: 1fr;
+        }
+        .sidebar {
+          position: fixed;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          width: min(88vw, 320px);
+          transform: translateX(-100%);
+          transition: transform 180ms ease;
+          z-index: 10;
+        }
+        .sidebar.open {
+          transform: translateX(0);
+        }
+        .topbar {
+          display: flex;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand">
+          <h1 id="site-title">cs336 repo walkthrough</h1>
+          <p>Manifest-driven preview for the repo review docs.</p>
+        </div>
+        <div class="controls">
+          <button type="button" id="sidebar-toggle">Toggle sidebar</button>
+        </div>
+        <input id="search" type="search" placeholder="Filter pages..." aria-label="Filter pages" />
+        <nav id="nav"></nav>
+      </aside>
+      <div class="content-wrap">
+        <div class="topbar">
+          <button type="button" id="mobile-toggle">Menu</button>
+          <strong id="mobile-title">cs336 repo walkthrough</strong>
+        </div>
+        <main>
+          <div class="meta" id="meta"></div>
+          <article class="markdown-body" id="content">Loading preview…</article>
+        </main>
+      </div>
+    </div>
+
+    <script type="module">
+      import { marked } from 'https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js';
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+      mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+
+      const navEl = document.getElementById('nav');
+      const contentEl = document.getElementById('content');
+      const metaEl = document.getElementById('meta');
+      const searchEl = document.getElementById('search');
+      const sidebarEl = document.getElementById('sidebar');
+      const siteTitleEl = document.getElementById('site-title');
+      const mobileTitleEl = document.getElementById('mobile-title');
+      const pageMap = new Map();
+
+      let manifest;
+
+      const normalizeHash = (value) => value ? decodeURIComponent(value.replace(/^#/, '')) : '';
+      const buildHash = (file) => `#${encodeURIComponent(file)}`;
+
+      document.getElementById('sidebar-toggle').addEventListener('click', () => {
+        sidebarEl.classList.toggle('open');
+      });
+      document.getElementById('mobile-toggle').addEventListener('click', () => {
+        sidebarEl.classList.toggle('open');
+      });
+
+      searchEl.addEventListener('input', () => renderSidebar(searchEl.value));
+      window.addEventListener('hashchange', () => renderPageFromHash());
+
+      const renderer = new marked.Renderer();
+      renderer.link = ({ href, title, text }) => {
+        if (href && /^([^:#?]+\.md)(#[^?]*)?$/.test(href)) {
+          const [, file, anchor = ''] = href.match(/^([^:#?]+\.md)(#[^?]*)?$/) || [];
+          const hash = buildHash(file) + (anchor || '');
+          return `<a href="${hash}" title="${title || ''}">${text}</a>`;
+        }
+        return `<a href="${href}" ${title ? `title="${title}"` : ''} target="_blank" rel="noreferrer">${text}</a>`;
+      };
+      renderer.image = ({ href, title, text }) => {
+        const safeTitle = title ? ` title="${title}"` : '';
+        return `<img src="${href}" alt="${text || ''}"${safeTitle} />`;
+      };
+
+      marked.setOptions({ renderer, gfm: true, breaks: false });
+
+      function renderSidebar(filterText = '') {
+        const filter = filterText.trim().toLowerCase();
+        navEl.innerHTML = '';
+        for (const section of manifest.sidebar) {
+          const items = (section.items || []).filter((item) => !filter || item.title.toLowerCase().includes(filter));
+          if (!items.length) continue;
+
+          const sectionEl = document.createElement('section');
+          sectionEl.className = 'nav-section';
+          const heading = document.createElement('h2');
+          heading.textContent = section.title;
+          sectionEl.appendChild(heading);
+
+          const list = document.createElement('ul');
+          list.className = 'nav-list';
+          for (const item of items) {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.className = 'nav-link';
+            a.href = buildHash(item.file);
+            a.textContent = item.title;
+            if (normalizeHash(location.hash) === item.file) {
+              a.classList.add('active');
+            }
+            li.appendChild(a);
+            list.appendChild(li);
+          }
+          sectionEl.appendChild(list);
+          navEl.appendChild(sectionEl);
+        }
+
+        if (!navEl.childElementCount) {
+          navEl.innerHTML = '<p class="empty">No pages match that filter.</p>';
+        }
+      }
+
+      async function renderMermaidBlocks() {
+        const blocks = Array.from(contentEl.querySelectorAll('pre code.language-mermaid'));
+        await Promise.all(blocks.map(async (block, index) => {
+          const parent = block.parentElement;
+          const source = block.textContent;
+          const id = `mermaid-${index}-${Date.now()}`;
+          try {
+            const { svg } = await mermaid.render(id, source);
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = svg;
+            parent.replaceWith(wrapper);
+          } catch (error) {
+            console.error('Mermaid render failed:', error);
+          }
+        }));
+      }
+
+      async function renderPage(file) {
+        const page = pageMap.get(file);
+        if (!page) {
+          contentEl.innerHTML = `<p class="empty">Unknown page: <code>${file}</code></p>`;
+          metaEl.textContent = '';
+          return;
+        }
+
+        const response = await fetch(file);
+        if (!response.ok) {
+          contentEl.innerHTML = `<p class="empty">Failed to load <code>${file}</code>: HTTP ${response.status}</p>`;
+          metaEl.textContent = '';
+          return;
+        }
+
+        const markdown = await response.text();
+        contentEl.innerHTML = marked.parse(markdown);
+        metaEl.textContent = `${page.title} · ${file}`;
+        document.title = `${page.title} · ${manifest.title}`;
+        mobileTitleEl.textContent = page.title;
+        renderSidebar(searchEl.value);
+        await renderMermaidBlocks();
+      }
+
+      async function renderPageFromHash() {
+        const current = normalizeHash(location.hash) || manifest.landing;
+        if (!pageMap.has(current)) {
+          location.hash = buildHash(manifest.landing);
+          return;
+        }
+        await renderPage(current);
+      }
+
+      async function init() {
+        const response = await fetch('./manifest.json');
+        manifest = await response.json();
+        siteTitleEl.textContent = manifest.title;
+        mobileTitleEl.textContent = manifest.title;
+
+        for (const section of manifest.sidebar) {
+          for (const item of section.items || []) {
+            pageMap.set(item.file, item);
+          }
+        }
+
+        renderSidebar('');
+        await renderPageFromHash();
+      }
+
+      init().catch((error) => {
+        console.error(error);
+        contentEl.innerHTML = `<p class="empty">Preview bootstrap failed: ${error.message}</p>`;
+      });
+    </script>
+  </body>
+</html>
