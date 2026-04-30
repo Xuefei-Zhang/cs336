@@ -37,3 +37,17 @@ def test_select_cuda_visible_devices_prefers_gpu_with_most_free_memory(
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
     assert _load_gpu_selector()(None) == "2"
+
+
+def test_select_cuda_visible_devices_keeps_legacy_single_gpu_wrapper_contract() -> None:
+    from aiinfra_e2e.serve.resource_plan import GpuDevice, select_gpus
+
+    inventory = [
+        GpuDevice(index=0, memory_used_mb=10, memory_total_mb=81920, utilization_gpu=0, process_count=0),
+        GpuDevice(index=1, memory_used_mb=20, memory_total_mb=81920, utilization_gpu=0, process_count=0),
+    ]
+
+    allocation = select_gpus(inventory, count=1, policy="single_free")
+
+    assert allocation.cuda_visible_devices == "0"
+    assert allocation.selected_gpu_indices == [0]
