@@ -16,6 +16,7 @@
       "items": [
         { "file": "serve-vllm-deep-dive.md", "title": "serve / vLLM deep dive" },
         { "file": "manual-serve-command-codepath-review.md", "title": "manual serve command codepath review" },
+        { "file": "qwen3.5-122b-a10b-gptq-int4-config-review.md", "title": "qwen3.5-122b-a10b-gptq-int4 config review" },
         { "file": "train-sft-deep-dive.md", "title": "train / SFT deep dive" },
         { "file": "loadtest-deep-dive.md", "title": "loadtest deep dive" },
         { "file": "inference-metrics-codepath-review.md", "title": "inference metrics codepath review" }
